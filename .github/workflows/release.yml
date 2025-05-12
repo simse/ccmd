@@ -2,7 +2,6 @@
 name: release
 
 on:
-  pull_request:
   push:
     # run only against tags
     tags:
@@ -12,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
