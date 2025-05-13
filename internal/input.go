@@ -3,53 +3,108 @@ package internal
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/cespare/xxhash/v2"
+	"github.com/charlievieth/fastwalk"
 )
 
-func FindFiles(patterns []string, rootDir string) ([]string, error) {
+func FindFiles(
+	includePatterns []string,
+	ignorePatterns []string,
+	rootDir string,
+) ([]string, error) {
 	var paths []string
+	prefixes := ExtractPrefixes(includePatterns)
+	conf := fastwalk.Config{Follow: false}
 
-	// Walk the directory tree
-	err := filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+	walkFn := func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && d.Name() == "node_modules" {
-			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			return nil
-		}
 
-		// Compute path relative to rootDir for matching & hashing
+		// compute relative path
 		rel, err := filepath.Rel(rootDir, path)
 		if err != nil {
 			return err
 		}
 
-		// Check each pattern
-		for _, pat := range patterns {
-			match, _ := doublestar.Match(pat, rel)
-			if match {
-				paths = append(paths, path)
-				break
+		// 1) global ignores
+		for _, pat := range ignorePatterns {
+			if ok, _ := doublestar.Match(pat, rel); ok {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 		}
+
+		// 2) built-in skips
+		if d.IsDir() && d.Name() == "node_modules" {
+			return filepath.SkipDir
+		}
+
+		// 3) only prune by prefixes if we actually have prefixes
+		if d.IsDir() && len(prefixes) > 0 && rel != "." {
+			keep := false
+			for _, p := range prefixes {
+				if rel == p || strings.HasPrefix(rel, p+string(os.PathSeparator)) {
+					keep = true
+					break
+				}
+			}
+			if !keep {
+				return filepath.SkipDir
+			}
+		}
+
+		// 4) match includes
+		if !d.IsDir() {
+			for _, pat := range includePatterns {
+				if ok, _ := doublestar.Match(pat, rel); ok {
+					paths = append(paths, path)
+					break
+				}
+			}
+		}
+
 		return nil
-	})
-	if err != nil {
-		return []string{}, err
 	}
 
-	// Deterministic order
-	sort.Strings(paths)
+	if err := fastwalk.Walk(&conf, rootDir, walkFn); err != nil {
+		return nil, err
+	}
 
+	sort.Strings(paths)
 	return paths, nil
+}
+
+// extractPrefixes pulls the static directory prefixes from your globs.
+// It deliberately skips any empty or “.” prefix.
+func ExtractPrefixes(patterns []string) []string {
+	seen := make(map[string]struct{})
+	for _, pat := range patterns {
+		cut := pat
+		if idx := strings.IndexAny(pat, "*?["); idx >= 0 {
+			cut = pat[:idx]
+		}
+		dir := filepath.Clean(filepath.Dir(cut))
+		// skip empty (".") prefixes
+		if dir == "" || dir == "." {
+			continue
+		}
+		seen[dir] = struct{}{}
+	}
+	var prefixes []string
+	for p := range seen {
+		prefixes = append(prefixes, p)
+	}
+	return prefixes
 }
 
 func HashDir(paths []string, fingerprint string) (string, error) {

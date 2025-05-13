@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func RunCommand(command string, workingDirectory string) error {
+func RunCommand(command string, workingDirectory string) ([]byte, error) {
 	commandParts := strings.Split(command, " ")
 	executable := commandParts[0]
 	args := commandParts[1:]
@@ -13,5 +13,5 @@ func RunCommand(command string, workingDirectory string) error {
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = workingDirectory
 
-	return cmd.Run()
+	return cmd.Output()
 }
