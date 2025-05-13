@@ -27,6 +27,20 @@ archives:
       - goos: windows
         formats: [zip]
 
+brews:
+  - name: ccmd
+    commit_author:
+      name: Robot Simon
+      email: bot@simse.io
+    homepage: "https://simse.io/ccmd"
+    description: "Tool to cache slow commands."
+    license: "MIT"
+    repository:
+      owner: simse
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+
 changelog:
   sort: asc
   filters:
