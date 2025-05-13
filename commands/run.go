@@ -54,7 +54,7 @@ func RunCommand(args *RunCommandArgs) {
 
 	// find matching input files
 	findFilesStart := time.Now()
-	inputFiles, err := internal.FindFiles(args.Input, workingDirectory)
+	inputFiles, err := internal.FindFiles(args.Input, args.Output, workingDirectory)
 	profiling.FindFiles = time.Since(findFilesStart)
 
 	if err != nil {
@@ -108,12 +108,14 @@ func RunCommand(args *RunCommandArgs) {
 		fmt.Print("Running command: ")
 		color.Cyan(args.Command)
 		commandExecutionStart := time.Now()
-		err = internal.RunCommand(args.Command, workingDirectory)
+		out, err := internal.RunCommand(args.Command, workingDirectory)
 
 		if err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
+
+		fmt.Println(string(out))
 
 		profiling.CommandExecution = time.Since(commandExecutionStart)
 
@@ -121,10 +123,7 @@ func RunCommand(args *RunCommandArgs) {
 
 		// capture output
 		saveToCacheStart := time.Now()
-		outputFiles, err := internal.FindFiles(args.Output, workingDirectory)
-
-		// fmt.Println(outputFiles)
-		// return
+		outputFiles, err := internal.FindFiles(args.Output, []string{}, workingDirectory)
 
 		if err != nil {
 			fmt.Println("error occured while searching for output files")
