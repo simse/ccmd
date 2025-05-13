@@ -108,14 +108,12 @@ func RunCommand(args *RunCommandArgs) {
 		fmt.Print("Running command: ")
 		color.Cyan(args.Command)
 		commandExecutionStart := time.Now()
-		out, err := internal.RunCommand(args.Command, workingDirectory)
+		err := internal.RunCommand(args.Command, workingDirectory)
 
 		if err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
-
-		fmt.Println(string(out))
 
 		profiling.CommandExecution = time.Since(commandExecutionStart)
 
