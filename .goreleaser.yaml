@@ -35,6 +35,7 @@ brews:
     homepage: "https://simse.io/ccmd"
     description: "Tool to cache slow commands."
     license: "MIT"
+    directory: Formula
     repository:
       owner: simse
       name: homebrew-tap
