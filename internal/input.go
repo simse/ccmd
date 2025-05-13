@@ -52,7 +52,7 @@ func FindFiles(patterns []string, rootDir string) ([]string, error) {
 	return paths, nil
 }
 
-func HashDir(paths []string) (string, error) {
+func HashDir(paths []string, fingerprint string) (string, error) {
 	// Deterministic order
 	sort.Strings(paths)
 
@@ -77,6 +77,8 @@ func HashDir(paths []string) (string, error) {
 		f.Close()
 		h.Write([]byte{0}) // separator
 	}
+
+	h.WriteString(fingerprint)
 
 	rawHash := h.Sum64()
 

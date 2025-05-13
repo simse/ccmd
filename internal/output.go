@@ -8,81 +8,83 @@ import (
 	"path/filepath"
 )
 
-func CaptureOutput(paths []string, key string) (int64, error) {
+func CaptureOutput(paths []string, key string, cwd string) (int64, error) {
 	createCacheDir()
 
-	return CreateArchive(paths, getEntryPath(key))
+	return CreateArchive(paths, getEntryPath(key), cwd)
 }
 
-func CreateArchive(paths []string, destPath string) (int64, error) {
-	// Create destination file
+func CreateArchive(paths []string, destPath string, cwd string) (int64, error) {
 	outFile, err := os.Create(destPath)
 	if err != nil {
 		return 0, err
 	}
 	defer outFile.Close()
 
-	// Set up gzip writer with BestSpeed for fastest compression
 	gzWriter, err := gzip.NewWriterLevel(outFile, gzip.BestSpeed)
 	if err != nil {
 		return 0, err
 	}
 	defer gzWriter.Close()
 
-	// Create tar writer
 	tarWriter := tar.NewWriter(gzWriter)
 	defer tarWriter.Close()
 
+	absoluteCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return 0, err
+	}
+
 	for _, source := range paths {
-		// Walk through files and directories
-		error := filepath.Walk(source, func(file string, fi os.FileInfo, err error) error {
+		err := filepath.Walk(source, func(file string, fi os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 
-			// Create header
-			hdr, err := tar.FileInfoHeader(fi, fi.Name())
+			hdr, err := tar.FileInfoHeader(fi, "")
 			if err != nil {
 				return err
 			}
 
-			// Preserve the relative path
-			relPath, err := filepath.Rel(filepath.Dir(source), file)
+			// make file absolute so Rel() always works
+			absFile := file
+			if !filepath.IsAbs(file) {
+				absFile, err = filepath.Abs(file)
+				if err != nil {
+					return err
+				}
+			}
+
+			// compute path inside the tar relative to cwd
+			relPath, err := filepath.Rel(absoluteCwd, absFile)
 			if err != nil {
 				return err
 			}
-			hdr.Name = relPath
+			hdr.Name = filepath.ToSlash(relPath)
 
-			// Write header
 			if err := tarWriter.WriteHeader(hdr); err != nil {
 				return err
 			}
 
-			// If not a regular file, skip writing content
-			if !fi.Mode().IsRegular() {
-				return nil
-			}
+			if fi.Mode().IsRegular() {
+				f, err := os.Open(file)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
 
-			// Open file for reading
-			f, err := os.Open(file)
-			if err != nil {
-				return err
+				if _, err := io.Copy(tarWriter, f); err != nil {
+					return err
+				}
 			}
-			defer f.Close()
-
-			// Copy file data into tar
-			_, err = io.Copy(tarWriter, f)
-			return err
+			return nil
 		})
-
-		if error != nil {
-			return 0, error
+		if err != nil {
+			return 0, err
 		}
 	}
 
-	// get archive size
 	stat, _ := outFile.Stat()
-
 	return stat.Size(), nil
 }
 
