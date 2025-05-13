@@ -11,7 +11,6 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/cespare/xxhash/v2"
-	"github.com/charlievieth/fastwalk"
 )
 
 func FindFiles(
@@ -20,9 +19,6 @@ func FindFiles(
 	rootDir string,
 ) ([]string, error) {
 	var paths []string
-	prefixes := ExtractPrefixes(includePatterns)
-	conf := fastwalk.Config{Follow: false}
-
 	walkFn := func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -49,21 +45,7 @@ func FindFiles(
 			return filepath.SkipDir
 		}
 
-		// 3) only prune by prefixes if we actually have prefixes
-		if d.IsDir() && len(prefixes) > 0 && rel != "." {
-			keep := false
-			for _, p := range prefixes {
-				if rel == p || strings.HasPrefix(rel, p+string(os.PathSeparator)) {
-					keep = true
-					break
-				}
-			}
-			if !keep {
-				return filepath.SkipDir
-			}
-		}
-
-		// 4) match includes
+		// 3) match includes
 		if !d.IsDir() {
 			for _, pat := range includePatterns {
 				if ok, _ := doublestar.Match(pat, rel); ok {
@@ -76,7 +58,7 @@ func FindFiles(
 		return nil
 	}
 
-	if err := fastwalk.Walk(&conf, rootDir, walkFn); err != nil {
+	if err := filepath.WalkDir(rootDir, walkFn); err != nil {
 		return nil, err
 	}
 
