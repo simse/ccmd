@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alexflint/go-arg"
@@ -12,7 +13,7 @@ import (
 
 func main() {
 	var args struct {
-		Input            []string `arg:"required"`
+		Input            []string `arg:"-i,--input,required"`
 		Output           []string `arg:"required"`
 		Command          string   `arg:"required"`
 		WorkingDirectory string   `arg:"--cwd"`
@@ -36,6 +37,14 @@ func main() {
 
 	if workingDirectory == "" {
 		workingDirectory, _ = os.Getwd()
+	}
+
+	// validate args
+	for _, inputPattern := range args.Input {
+		if strings.Contains(inputPattern, "../") {
+			fmt.Println("! input pattern cannot be relative, use --cwd to change to parent directory")
+			os.Exit(1)
+		}
 	}
 
 	// find matching input files
