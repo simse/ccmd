@@ -2,9 +2,24 @@ package internal
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path"
+	"strings"
 )
+
+type CacheProvider interface {
+	GetEntry(string) (io.ReadCloser, error)
+	PutEntry(string, io.Reader) (int64, error)
+}
+
+func GetCacheProviderFromURI(uri string) (CacheProvider, error) {
+	if strings.HasPrefix(uri, "s3://") {
+		return &S3Cache{URI: uri}, nil
+	}
+
+	return nil, errors.New("unsupported cache provider")
+}
 
 func getEntryPath(key string) string {
 	homeDir, _ := os.UserHomeDir()

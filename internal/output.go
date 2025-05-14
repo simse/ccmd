@@ -8,100 +8,92 @@ import (
 	"path/filepath"
 )
 
-func CaptureOutput(paths []string, key string, cwd string) (int64, error) {
+func CaptureOutput(paths []string, key string, cwd string) (io.Reader, error) {
 	createCacheDir()
 
-	return CreateArchive(paths, getEntryPath(key), cwd)
+	return CreateArchive(paths, cwd)
 }
 
-func CreateArchive(paths []string, destPath string, cwd string) (int64, error) {
-	outFile, err := os.Create(destPath)
-	if err != nil {
-		return 0, err
-	}
-	defer outFile.Close()
+func CreateArchive(paths []string, cwd string) (io.Reader, error) {
+	pr, pw := io.Pipe()
 
-	gzWriter, err := gzip.NewWriterLevel(outFile, gzip.BestSpeed)
-	if err != nil {
-		return 0, err
-	}
-	defer gzWriter.Close()
+	go func() {
+		// If anything errors out, send it down the pipe and close
+		defer pw.Close()
 
-	tarWriter := tar.NewWriter(gzWriter)
-	defer tarWriter.Close()
+		gz := gzip.NewWriter(pw)
+		defer gz.Close()
 
-	absoluteCwd, err := filepath.Abs(cwd)
-	if err != nil {
-		return 0, err
-	}
+		tw := tar.NewWriter(gz)
+		defer tw.Close()
 
-	for _, source := range paths {
-		err := filepath.Walk(source, func(file string, fi os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-
-			hdr, err := tar.FileInfoHeader(fi, "")
-			if err != nil {
-				return err
-			}
-
-			// make file absolute so Rel() always works
-			absFile := file
-			if !filepath.IsAbs(file) {
-				absFile, err = filepath.Abs(file)
-				if err != nil {
-					return err
-				}
-			}
-
-			// compute path inside the tar relative to cwd
-			relPath, err := filepath.Rel(absoluteCwd, absFile)
-			if err != nil {
-				return err
-			}
-			hdr.Name = filepath.ToSlash(relPath)
-
-			if err := tarWriter.WriteHeader(hdr); err != nil {
-				return err
-			}
-
-			if fi.Mode().IsRegular() {
-				f, err := os.Open(file)
-				if err != nil {
-					return err
-				}
-				defer f.Close()
-
-				if _, err := io.Copy(tarWriter, f); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		absCwd, err := filepath.Abs(cwd)
 		if err != nil {
-			return 0, err
+			pw.CloseWithError(err)
+			return
 		}
-	}
 
-	stat, _ := outFile.Stat()
-	return stat.Size(), nil
+		for _, src := range paths {
+			err := filepath.Walk(src, func(file string, fi os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				hdr, err := tar.FileInfoHeader(fi, "")
+				if err != nil {
+					return err
+				}
+				absFile := file
+				if !filepath.IsAbs(file) {
+					absFile, err = filepath.Abs(file)
+					if err != nil {
+						return err
+					}
+				}
+				rel, err := filepath.Rel(absCwd, absFile)
+				if err != nil {
+					return err
+				}
+				hdr.Name = filepath.ToSlash(rel)
+
+				if err := tw.WriteHeader(hdr); err != nil {
+					return err
+				}
+				if fi.Mode().IsRegular() {
+					f, err := os.Open(file)
+					if err != nil {
+						return err
+					}
+					defer f.Close()
+					if _, err := io.Copy(tw, f); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+		}
+	}()
+
+	return pr, nil
 }
 
 // ExtractArchive takes a .tar.gz archive at srcPath and extracts its
 // contents into destDir, recreating the original file structure.
-func ExtractArchive(key, destDir string) ([]string, error) {
-	srcPath := getEntryPath(key)
+func ExtractArchive(cacheBody io.Reader, destDir string) ([]string, error) {
+	// srcPath := getEntryPath(key)
 
 	// Open the archive for reading
-	inFile, err := os.Open(srcPath)
-	if err != nil {
-		return []string{}, err
-	}
-	defer inFile.Close()
+	// inFile, err := os.Open(srcPath)
+	// if err != nil {
+	// 	return []string{}, err
+	// }
+	// defer inFile.Close()
 
 	// Set up gzip reader
-	gzReader, err := gzip.NewReader(inFile)
+	gzReader, err := gzip.NewReader(cacheBody)
 	if err != nil {
 		return []string{}, err
 	}
