@@ -9,8 +9,6 @@ import (
 )
 
 func CaptureOutput(paths []string, key string, cwd string) (io.Reader, error) {
-	createCacheDir()
-
 	return CreateArchive(paths, cwd)
 }
 

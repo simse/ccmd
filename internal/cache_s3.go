@@ -36,6 +36,10 @@ func (s *S3Cache) getClient() (*s3.Client, error) {
 	return s.Client, nil
 }
 
+func (s *S3Cache) GetFriendlyName() string {
+	return "s3"
+}
+
 func (s *S3Cache) GetEntry(key string) (io.ReadCloser, error) {
 	client, err := s.getClient()
 

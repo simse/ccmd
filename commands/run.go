@@ -10,7 +10,10 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/simse/cmd-cache/internal"
+	"github.com/spf13/afero"
 )
+
+var AppFs = afero.NewOsFs()
 
 // formatting utils
 var dimGrey = color.RGB(100, 100, 100)
@@ -20,7 +23,7 @@ type RunCommandArgs struct {
 	Output           []string `arg:"required"`
 	Command          string   `arg:"required"`
 	WorkingDirectory string   `arg:"--cwd"`
-	RemoteCache      []string `arg:"--remote-cache"`
+	Cache            []string `arg:"--cache"`
 }
 
 var profiling struct {
@@ -45,15 +48,19 @@ func RunCommand(args *RunCommandArgs) {
 	absoluteWorkingDirectory, _ := filepath.Abs(workingDirectory)
 
 	// validate args
-	for _, inputPattern := range args.Input {
-		if strings.Contains(inputPattern, "../") {
-			fmt.Println("! input pattern cannot be relative, use --cwd to change to parent directory")
-			os.Exit(1)
-		}
+	validateArgs(*args)
+
+	// if no cache providers are given, fall back to local cache
+	if len(args.Cache) == 0 {
+		args.Cache = []string{"local://test"}
 	}
 
+	// print runtime information
 	fmt.Print("Using working directory: ")
 	color.Cyan(absoluteWorkingDirectory)
+
+	fmt.Print("Cache providers to be used: ")
+	color.Cyan(strings.Join(args.Cache, ", "))
 
 	// find matching input files
 	findFilesStart := time.Now()
@@ -75,7 +82,7 @@ func RunCommand(args *RunCommandArgs) {
 
 	// calculate hash of inputs
 	hashFilesStart := time.Now()
-	inputChecksum, err := internal.HashDir(inputFiles, workingDirectory)
+	inputChecksum, err := internal.HashDir(AppFs, inputFiles, workingDirectory)
 	profiling.HashFiles = time.Since(hashFilesStart)
 
 	if err != nil {
@@ -87,8 +94,7 @@ func RunCommand(args *RunCommandArgs) {
 
 	// check cache
 	cacheLookupStart := time.Now()
-	// existsInCache := internal.CacheKeyExists(inputChecksum)
-	cacheReader := cacheLookup(inputChecksum, args.RemoteCache)
+	cacheReader := cacheLookup(inputChecksum, args.Cache)
 	profiling.CacheLookup = time.Since(cacheLookupStart)
 
 	// if cache exists, then extract
@@ -103,7 +109,7 @@ func RunCommand(args *RunCommandArgs) {
 			os.Exit(1)
 		}
 
-		dimGrey.Printf("Found in cache: served from s3 in %s\n", formatDuration(profiling.CacheLookup+profiling.CacheExtract))
+		dimGrey.Printf("Found in cache: served %s\n", formatDuration(profiling.CacheLookup+profiling.CacheExtract))
 		printFileList(outputFiles, 10, "->")
 	} else { // otherwise execute command, then save
 		dimGrey.Printf("Cache miss: executing command...\n\n")
@@ -144,13 +150,39 @@ func RunCommand(args *RunCommandArgs) {
 			fmt.Println(saveOutputErr.Error())
 		}
 
-		cacheSave(inputChecksum, args.RemoteCache, output)
+		cacheSave(inputChecksum, args.Cache, output)
 
 		printFileList(outputFiles, 10, "+")
 	}
 }
 
 /* helpers */
+func printError(error string, exitCode int) {
+	color.Set(color.FgRed)
+	fmt.Printf("! ")
+	color.Set(color.FgHiWhite)
+	fmt.Println(error)
+	os.Exit(exitCode)
+}
+
+func validateArgs(args RunCommandArgs) {
+	// validate input patterns
+	for _, inputPattern := range args.Input {
+		if strings.Contains(inputPattern, "../") {
+			printError("Input pattern cannot be relative, use --cwd to change to parent directory", 1)
+		}
+	}
+
+	// validate cache providers
+	for _, cacheProvider := range args.Cache {
+		provider, _ := internal.GetCacheProviderFromURI(cacheProvider)
+
+		if provider == nil {
+			printError(fmt.Sprintf("Unknown cache provider: %s", cacheProvider), 1)
+		}
+	}
+}
+
 func printFileList(files []string, maxFiles int, prefix string) {
 	grey := color.RGB(170, 170, 170).PrintfFunc()
 
@@ -177,7 +209,7 @@ func cacheLookup(key string, caches []string) io.ReadCloser {
 		provider, err := internal.GetCacheProviderFromURI(cacheUri)
 
 		if err != nil {
-			dimGrey.Printf("Invalid cache provider: %s\n", key)
+			dimGrey.Printf("Invalid cache provider: %s\n", cacheUri)
 			return nil
 		}
 
@@ -201,7 +233,7 @@ func cacheSave(key string, caches []string, body io.Reader) {
 		provider, err := internal.GetCacheProviderFromURI(cacheUri)
 
 		if err != nil {
-			dimGrey.Printf("Invalid cache provider: %s\n", key)
+			dimGrey.Printf("Invalid cache provider: %s\n", cacheUri)
 			return
 		}
 
