@@ -1,0 +1,7 @@
+{
+	"devDependencies": {
+		"@biomejs/biome": "1.9.4",
+		"mint": "4.1.17"
+	},
+	"trustedDependencies": ["@biomejs/biome"]
+}

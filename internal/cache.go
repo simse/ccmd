@@ -2,27 +2,35 @@ package internal
 
 import (
 	"errors"
-	"os"
-	"path"
+	"io"
+	"strings"
+
+	"github.com/spf13/afero"
 )
 
-func getEntryPath(key string) string {
-	homeDir, _ := os.UserHomeDir()
-
-	return path.Join(homeDir, ".ccmd", key)
+type CacheProvider interface {
+	GetEntry(string) (io.ReadCloser, error)
+	PutEntry(string, io.Reader) (int64, error)
+	GetFriendlyName() string
 }
 
-func createCacheDir() {
-	homeDir, _ := os.UserHomeDir()
+func GetCacheProviderFromURI(uri string) (CacheProvider, error) {
+	if strings.HasPrefix(uri, "s3://") {
+		return &S3Cache{URI: uri}, nil
+	}
 
-	os.Mkdir(path.Join(homeDir, ".ccmd"), 0750)
+	if strings.HasPrefix(uri, "local://") {
+		return &LocalCache{URI: uri, FS: afero.NewOsFs()}, nil
+	}
+
+	return nil, errors.New("unsupported cache provider")
 }
 
 // could this be better ??
-func CacheKeyExists(key string) bool {
-	if _, err := os.Stat(getEntryPath(key)); errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-
-	return true
-}
+// func CacheKeyExists(key string) bool {
+// 	if _, err := os.Stat(getEntryPath(key)); errors.Is(err, os.ErrNotExist) {
+// 		return false
+// 	}
+//
+// 	return true
+// }

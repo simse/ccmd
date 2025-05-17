@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/cespare/xxhash/v2"
+	"github.com/spf13/afero"
 )
 
 func FindFiles(
@@ -49,7 +49,10 @@ func FindFiles(
 		if !d.IsDir() {
 			for _, pat := range includePatterns {
 				if ok, _ := doublestar.Match(pat, rel); ok {
-					paths = append(paths, path)
+					// determine absolute path
+					abs, _ := filepath.Abs(path)
+
+					paths = append(paths, abs)
 					break
 				}
 			}
@@ -89,7 +92,7 @@ func ExtractPrefixes(patterns []string) []string {
 	return prefixes
 }
 
-func HashDir(paths []string, fingerprint string) (string, error) {
+func HashDir(fs afero.Fs, paths []string, fingerprint string) (string, error) {
 	// Deterministic order
 	sort.Strings(paths)
 
@@ -103,7 +106,7 @@ func HashDir(paths []string, fingerprint string) (string, error) {
 		h.Write([]byte{0}) // separator
 
 		// Open and hash file content
-		f, err := os.Open(path)
+		f, err := fs.Open(path)
 		if err != nil {
 			return "", err
 		}

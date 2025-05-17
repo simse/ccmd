@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,10 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/simse/cmd-cache/internal"
+	"github.com/spf13/afero"
 )
+
+var AppFs = afero.NewOsFs()
 
 // formatting utils
 var dimGrey = color.RGB(100, 100, 100)
@@ -19,18 +23,20 @@ type RunCommandArgs struct {
 	Output           []string `arg:"required"`
 	Command          string   `arg:"required"`
 	WorkingDirectory string   `arg:"--cwd"`
-	Profile          bool     `arg:"--profile"`
+	Cache            []string `arg:"--cache"`
+}
+
+var profiling struct {
+	FindFiles        time.Duration
+	HashFiles        time.Duration
+	CacheLookup      time.Duration
+	CacheExtract     time.Duration
+	CommandExecution time.Duration
+	CacheSaveStart   time.Time
+	CacheSave        time.Duration
 }
 
 func RunCommand(args *RunCommandArgs) {
-	var profiling struct {
-		FindFiles        time.Duration
-		HashFiles        time.Duration
-		CacheLookup      time.Duration
-		CacheExtract     time.Duration
-		CommandExecution time.Duration
-		CacheSave        time.Duration
-	}
 
 	// determine working directory
 	workingDirectory := args.WorkingDirectory
@@ -42,15 +48,19 @@ func RunCommand(args *RunCommandArgs) {
 	absoluteWorkingDirectory, _ := filepath.Abs(workingDirectory)
 
 	// validate args
-	for _, inputPattern := range args.Input {
-		if strings.Contains(inputPattern, "../") {
-			fmt.Println("! input pattern cannot be relative, use --cwd to change to parent directory")
-			os.Exit(1)
-		}
+	validateArgs(*args)
+
+	// if no cache providers are given, fall back to local cache
+	if len(args.Cache) == 0 {
+		args.Cache = []string{"local://test"}
 	}
 
+	// print runtime information
 	fmt.Print("Using working directory: ")
 	color.Cyan(absoluteWorkingDirectory)
+
+	fmt.Print("Cache backends: ")
+	color.Cyan(strings.Join(args.Cache, ", "))
 
 	// find matching input files
 	findFilesStart := time.Now()
@@ -72,7 +82,7 @@ func RunCommand(args *RunCommandArgs) {
 
 	// calculate hash of inputs
 	hashFilesStart := time.Now()
-	inputChecksum, err := internal.HashDir(inputFiles, workingDirectory)
+	inputChecksum, err := internal.HashDir(AppFs, inputFiles, workingDirectory)
 	profiling.HashFiles = time.Since(hashFilesStart)
 
 	if err != nil {
@@ -84,14 +94,14 @@ func RunCommand(args *RunCommandArgs) {
 
 	// check cache
 	cacheLookupStart := time.Now()
-	existsInCache := internal.CacheKeyExists(inputChecksum)
+	cacheReader := cacheLookup(inputChecksum, args.Cache)
 	profiling.CacheLookup = time.Since(cacheLookupStart)
 
 	// if cache exists, then extract
-	if existsInCache {
+	if cacheReader != nil {
 		// extract cache
 		cacheExtractStart := time.Now()
-		outputFiles, err := internal.ExtractArchive(inputChecksum, workingDirectory)
+		outputFiles, err := internal.ExtractArchive(cacheReader, workingDirectory)
 		profiling.CacheExtract = time.Since(cacheExtractStart)
 
 		if err != nil {
@@ -99,7 +109,7 @@ func RunCommand(args *RunCommandArgs) {
 			os.Exit(1)
 		}
 
-		dimGrey.Printf("Cache hit: served from cache in %s\n", formatDuration(profiling.CacheLookup+profiling.CacheExtract))
+		dimGrey.Printf("Found in cache: served %s\n", formatDuration(profiling.CacheLookup+profiling.CacheExtract))
 		printFileList(outputFiles, 10, "->")
 	} else { // otherwise execute command, then save
 		dimGrey.Printf("Cache miss: executing command...\n\n")
@@ -120,7 +130,7 @@ func RunCommand(args *RunCommandArgs) {
 		dimGrey.Printf("Command completed in %s\n", formatDuration(profiling.CommandExecution))
 
 		// capture output
-		saveToCacheStart := time.Now()
+		profiling.CacheSaveStart = time.Now()
 		outputFiles, err := internal.FindFiles(args.Output, []string{}, workingDirectory)
 
 		if err != nil {
@@ -134,16 +144,42 @@ func RunCommand(args *RunCommandArgs) {
 			os.Exit(1)
 		}
 
-		archiveSize, saveOutputErr := internal.CaptureOutput(outputFiles, inputChecksum, workingDirectory)
+		output, saveOutputErr := internal.CaptureOutput(outputFiles, inputChecksum, workingDirectory)
 		if saveOutputErr != nil {
 			fmt.Println("error occurred while saving output")
 			fmt.Println(saveOutputErr.Error())
 		}
 
-		profiling.CacheSave = time.Since(saveToCacheStart)
+		cacheSave(inputChecksum, args.Cache, output)
 
-		dimGrey.Printf("Stored result (%s) in cache in %s\n", internal.ByteCountSI(archiveSize), formatDuration(profiling.CacheSave))
 		printFileList(outputFiles, 10, "+")
+	}
+}
+
+/* helpers */
+func printError(error string, exitCode int) {
+	color.Set(color.FgRed)
+	fmt.Printf("! ")
+	color.Set(color.FgHiWhite)
+	fmt.Println(error)
+	os.Exit(exitCode)
+}
+
+func validateArgs(args RunCommandArgs) {
+	// validate input patterns
+	for _, inputPattern := range args.Input {
+		if strings.Contains(inputPattern, "../") {
+			printError("Input pattern cannot be relative, use --cwd to change to parent directory", 1)
+		}
+	}
+
+	// validate cache providers
+	for _, cacheProvider := range args.Cache {
+		provider, _ := internal.GetCacheProviderFromURI(cacheProvider)
+
+		if provider == nil {
+			printError(fmt.Sprintf("Unknown cache provider: %s", cacheProvider), 1)
+		}
 	}
 }
 
@@ -165,4 +201,53 @@ func printFileList(files []string, maxFiles int, prefix string) {
 func formatDuration(dur time.Duration) string {
 	ms := float64(dur.Microseconds()) / 1000
 	return fmt.Sprintf("%.2fms", ms)
+}
+
+/* steps */
+func cacheLookup(key string, caches []string) io.ReadCloser {
+	for _, cacheUri := range caches {
+		provider, err := internal.GetCacheProviderFromURI(cacheUri)
+
+		if err != nil {
+			dimGrey.Printf("Invalid cache provider: %s\n", cacheUri)
+			return nil
+		}
+
+		result, err := provider.GetEntry(key)
+
+		if err != nil {
+			dimGrey.Printf("Cache miss from %s: %s\n", cacheUri, err.Error())
+			continue
+		}
+
+		dimGrey.Printf("Cache hit from %s\n", cacheUri)
+
+		return result
+	}
+
+	return nil
+}
+
+func cacheSave(key string, caches []string, body io.Reader) {
+	for _, cacheUri := range caches {
+		provider, err := internal.GetCacheProviderFromURI(cacheUri)
+
+		if err != nil {
+			dimGrey.Printf("Invalid cache provider: %s\n", cacheUri)
+			return
+		}
+
+		bytesWritten, err := provider.PutEntry(key, body)
+
+		if err != nil {
+			fmt.Println("error occurred while saving cache: ", err.Error())
+			os.Exit(1)
+		}
+
+		profiling.CacheSave = time.Since(profiling.CacheSaveStart)
+
+		dimGrey.Printf("Stored result (%s) in cache in %s\n", internal.ByteCountSI(bytesWritten), formatDuration(profiling.CacheSave))
+
+		return
+	}
 }

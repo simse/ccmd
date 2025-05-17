@@ -1,6 +1,7 @@
 package internal_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/simse/cmd-cache/internal"
+	"github.com/spf13/afero"
 )
 
 // helper to create files and directories under root
@@ -172,4 +174,51 @@ func TestExtractPrefixes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzHashDir fuzzes HashDir(fs, []string{…}, fingerprint)
+func FuzzHashDir(f *testing.F) {
+	// Seed corpus with a couple of realistic cases
+	f.Add("foo.txt", []byte("hello"), "fp1")
+	f.Add("dir/bar.txt", []byte{}, "")
+
+	f.Fuzz(func(t *testing.T, name string, content []byte, fingerprint string) {
+		fs := afero.NewMemMapFs()
+
+		// Ensure parent directory exists
+		if dir := filepath.Dir(name); dir != "." {
+			if err := fs.MkdirAll(dir, 0755); err != nil {
+				// e.g. invalid path -> skip
+				t.Skip()
+			}
+		}
+
+		// Write the fuzzed file
+		if err := afero.WriteFile(fs, name, content, 0644); err != nil {
+			t.Skip() // e.g. name contains invalid chars
+		}
+
+		// Call into your function
+		hash1, err := internal.HashDir(fs, []string{name}, fingerprint)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// 1) Always a 16-char hex string
+		if len(hash1) != 16 {
+			t.Errorf("hash length = %d; want 16", len(hash1))
+		}
+		if _, err := fmt.Sscanf(hash1, "%016x", new(uint64)); err != nil {
+			t.Errorf("hash %q not valid hex: %v", hash1, err)
+		}
+
+		// 2) Determinism: two calls with identical inputs must match
+		hash2, err := internal.HashDir(fs, []string{name}, fingerprint)
+		if err != nil {
+			t.Fatalf("unexpected error on 2nd call: %v", err)
+		}
+		if hash1 != hash2 {
+			t.Errorf("hash not stable: %q vs %q", hash1, hash2)
+		}
+	})
 }
