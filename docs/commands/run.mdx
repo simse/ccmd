@@ -12,5 +12,23 @@ ccmd run [OPTIONS]
 
 ## Arguments
 <ParamField path="--input" type="[]string" required="true">
-  An example of a parameter field
+  One or more patterns to match when searching for input files in the working directory.
+
+  <Tip>Always wrap your glob patterns in quotes (e.g. `"src/**/*.ts"`) to prevent your shell from expanding them prematurely.</Tip>
+
+  <Expandable title="examples">
+  **Single pattern**
+  ```bash
+ccmd run --input "packages/**/generated/*.ts" --command "yarn codegen"
+  ```
+
+  **Multiple patterns**
+  ```bash
+ccmd run --input "packages/**/generated/*.ts" "apps/**/generated/*.ts" --command "yarn codegen"
+  ```
+  </Expandable>
+</ParamField>
+
+<ParamField path="--cwd" type="string">
+  Working directory to use. Defaults to your current directory if not provided.
 </ParamField>
