@@ -59,7 +59,7 @@ func RunCommand(args *RunCommandArgs) {
 	fmt.Print("Using working directory: ")
 	color.Cyan(absoluteWorkingDirectory)
 
-	fmt.Print("Cache providers to be used: ")
+	fmt.Print("Cache backends: ")
 	color.Cyan(strings.Join(args.Cache, ", "))
 
 	// find matching input files

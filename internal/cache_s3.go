@@ -14,16 +14,27 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-type S3Cache struct {
-	URI    string
-	Client *s3.Client
+// only what we need for GetEntry
+type S3API interface {
+	GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
-func (s *S3Cache) bucketName() string {
+// abstracts manager.NewUploader’s Upload method
+type Uploader interface {
+	Upload(ctx context.Context, in *s3.PutObjectInput, opts ...func(*manager.Uploader)) (*manager.UploadOutput, error)
+}
+
+type S3Cache struct {
+	URI      string
+	Client   S3API    // for GetEntry
+	Uploader Uploader // for PutEntry; tests inject, otherwise we build one
+}
+
+func (s *S3Cache) GetBucketName() string {
 	return strings.Replace(s.URI, "s3://", "", 1)
 }
 
-func (s *S3Cache) getClient() (*s3.Client, error) {
+func (s *S3Cache) getClient() (S3API, error) {
 	if s.Client == nil {
 		cfg, err := config.LoadDefaultConfig(context.TODO())
 		if err != nil {
@@ -49,7 +60,7 @@ func (s *S3Cache) GetEntry(key string) (io.ReadCloser, error) {
 
 	// check if entry exists by getting it
 	output, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(s.bucketName()),
+		Bucket: aws.String(s.GetBucketName()),
 		Key:    aws.String(key),
 	})
 
@@ -58,45 +69,50 @@ func (s *S3Cache) GetEntry(key string) (io.ReadCloser, error) {
 		if errors.As(err, &apiErr) {
 			switch apiErr.ErrorCode() {
 			case "NoSuchBucket":
-				return nil, fmt.Errorf("bucket %q does not exist", s.bucketName())
+				return nil, fmt.Errorf("bucket %q does not exist", s.GetBucketName())
 			case "NoSuchKey":
-				return nil, fmt.Errorf("object %q not found in bucket %q", key, s.bucketName())
+				return nil, fmt.Errorf("object %q not found in bucket %q", key, s.GetBucketName())
 			default:
 				return nil, fmt.Errorf("S3 API error %s: %s", apiErr.ErrorCode(), apiErr.ErrorMessage())
 			}
 		}
+
+		return nil, err
 	}
 
 	return output.Body, nil
 }
 
-type countingReader struct {
-	r io.Reader
-	n int64
+type CountingReader struct {
+	Reader    io.Reader
+	ByteCount int64
 }
 
-func (c *countingReader) Read(p []byte) (int, error) {
-	nn, err := c.r.Read(p)
-	c.n += int64(nn)
+func (c *CountingReader) Read(p []byte) (int, error) {
+	nn, err := c.Reader.Read(p)
+	c.ByteCount += int64(nn)
 	return nn, err
 }
 
-func (s *S3Cache) PutEntry(key string, contents io.Reader) (int64, error) {
-	client, err := s.getClient()
-	if err != nil {
-		return 0, err
+func (s *S3Cache) PutEntry(key string, body io.Reader) (int64, error) {
+	up := s.Uploader
+	if up == nil {
+		cfg, err := config.LoadDefaultConfig(context.TODO())
+		if err != nil {
+			return 0, err
+		}
+		realClient := s3.NewFromConfig(cfg)
+		up = manager.NewUploader(realClient)
 	}
 
-	counter := &countingReader{r: contents}
-	uploader := manager.NewUploader(client)
-	_, err = uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(s.bucketName()),
+	counter := &CountingReader{Reader: body}
+	if _, err := up.Upload(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(s.GetBucketName()),
 		Key:    aws.String(key),
 		Body:   counter,
-	})
-	if err != nil {
+	}); err != nil {
 		return 0, err
 	}
 
-	return counter.n, nil
+	return counter.ByteCount, nil
 }
