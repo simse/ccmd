@@ -1,0 +1,50 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "ccmd",
+  "colors": {
+    "primary": "#16A34A",
+    "light": "#07C983",
+    "dark": "#15803D"
+  },
+  "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "dark",
+    "strict": true
+  },
+  "navigation": {
+            "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "index",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "commands/run"
+            ]
+          }
+        ]
+,
+    "global": {
+      "anchors": [
+        {
+          "anchor": "View on Github",
+          "href": "https://github.com/simse/ccmd",
+          "icon": "github"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/assets/logo.svg",
+    "dark": "/assets/logo.svg"
+  },
+  "navbar": {
+  },
+  "footer": {
+  }
+}
