@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/alexflint/go-arg"
-	"github.com/simse/cmd-cache/commands"
+	"github.com/simse/ccmd/commands"
 )
 
 var (

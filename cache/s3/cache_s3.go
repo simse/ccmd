@@ -1,10 +1,12 @@
-package internal
+package s3
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,6 +30,54 @@ type S3Cache struct {
 	URI      string
 	Client   S3API    // for GetEntry
 	Uploader Uploader // for PutEntry; tests inject, otherwise we build one
+}
+
+func (s *S3Cache) Validate() error {
+	name := s.GetBucketName()
+
+	// 1. Length 3–255
+	if n := len(name); n < 3 || n > 255 {
+		return fmt.Errorf("bucket name must be between 3 and 255 characters; got %d", n)
+	}
+
+	// 2. Only lowercase letters, numbers, periods, hyphens
+	if m, _ := regexp.MatchString(`^[a-z0-9.-]+$`, name); !m {
+		return errors.New("bucket name can contain only lowercase letters, numbers, periods, and hyphens")
+	}
+
+	// 3. Must begin and end with letter or number
+	if !regexp.MustCompile(`^[a-z0-9]`).MatchString(name) ||
+		!regexp.MustCompile(`[a-z0-9]$`).MatchString(name) {
+		return errors.New("bucket name must begin and end with a letter or number")
+	}
+
+	// 4. No two adjacent periods
+	if strings.Contains(name, "..") {
+		return errors.New("bucket name must not contain consecutive periods")
+	}
+
+	// 5. Not formatted as IP address (e.g. 192.168.5.4)
+	if strings.Count(name, ".") == 3 && net.ParseIP(name) != nil {
+		return errors.New("bucket name must not be formatted as an IP address")
+	}
+
+	// 6. Forbidden prefixes
+	forbiddenPrefixes := []string{"xn--", "sthree-", "amzn-s3-demo-"}
+	for _, p := range forbiddenPrefixes {
+		if strings.HasPrefix(name, p) {
+			return fmt.Errorf("bucket name must not start with the reserved prefix %q", p)
+		}
+	}
+
+	// 7. Forbidden suffixes
+	forbiddenSuffixes := []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3"}
+	for _, s := range forbiddenSuffixes {
+		if strings.HasSuffix(name, s) {
+			return fmt.Errorf("bucket name must not end with the reserved suffix %q", s)
+		}
+	}
+
+	return nil
 }
 
 func (s *S3Cache) GetBucketName() string {

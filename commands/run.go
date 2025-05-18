@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/simse/cmd-cache/internal"
+	"github.com/simse/ccmd/cache"
+	"github.com/simse/ccmd/internal"
 	"github.com/spf13/afero"
 )
 
@@ -175,7 +176,7 @@ func validateArgs(args RunCommandArgs) {
 
 	// validate cache providers
 	for _, cacheProvider := range args.Cache {
-		provider, _ := internal.GetCacheProviderFromURI(cacheProvider)
+		provider, _ := cache.GetCacheProviderFromURI(cacheProvider)
 
 		if provider == nil {
 			printError(fmt.Sprintf("Unknown cache provider: %s", cacheProvider), 1)
@@ -206,7 +207,7 @@ func formatDuration(dur time.Duration) string {
 /* steps */
 func cacheLookup(key string, caches []string) io.ReadCloser {
 	for _, cacheUri := range caches {
-		provider, err := internal.GetCacheProviderFromURI(cacheUri)
+		provider, err := cache.GetCacheProviderFromURI(cacheUri)
 
 		if err != nil {
 			dimGrey.Printf("Invalid cache provider: %s\n", cacheUri)
@@ -230,7 +231,7 @@ func cacheLookup(key string, caches []string) io.ReadCloser {
 
 func cacheSave(key string, caches []string, body io.Reader) {
 	for _, cacheUri := range caches {
-		provider, err := internal.GetCacheProviderFromURI(cacheUri)
+		provider, err := cache.GetCacheProviderFromURI(cacheUri)
 
 		if err != nil {
 			dimGrey.Printf("Invalid cache provider: %s\n", cacheUri)

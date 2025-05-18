@@ -14,6 +14,10 @@ type LocalCache struct {
 	FS  afero.Fs
 }
 
+func (l *LocalCache) Validate() error {
+	return nil
+}
+
 func (l *LocalCache) GetEntry(key string) (io.ReadCloser, error) {
 	// check if file exists
 	if _, err := l.FS.Stat(l.getEntryPath(key)); err != nil {

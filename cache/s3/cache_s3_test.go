@@ -1,4 +1,4 @@
-package internal_test
+package s3
 
 import (
 	"bytes"
@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
-	"github.com/simse/cmd-cache/internal"
 )
 
 // mock S3 API
@@ -48,7 +48,7 @@ func (f *fakeUploader) Upload(_ context.Context, in *s3.PutObjectInput, _ ...fun
 
 // actual test cases
 func TestGetBucketName(t *testing.T) {
-	if b := (&internal.S3Cache{URI: "s3://abc"}).GetBucketName(); b != "abc" {
+	if b := (&S3Cache{URI: "s3://abc"}).GetBucketName(); b != "abc" {
 		t.Fatal("got", b)
 	}
 }
@@ -66,6 +66,82 @@ func TestGetBucketName(t *testing.T) {
 // 		}
 // 	})
 // }
+
+func TestValidateBucketName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		// valid
+		{"abc", false},
+		{"my.bucket-123", false},
+		{strings.Repeat("a", 255), false},
+
+		// invalid: length
+		{"ab", true},
+		{strings.Repeat("a", 256), true},
+
+		// invalid: characters
+		{"UpperCase", true},
+		{"has_underscore", true},
+
+		// invalid: start/end
+		{"-starts", true},
+		{"ends-", true},
+		{".startsdot", true},
+		{"endsdot.", true},
+
+		// invalid: adjacent dots
+		{"has..dots", true},
+
+		// invalid: IP-style
+		{"192.168.0.1", true},
+
+		// invalid: forbidden prefixes
+		{"xn--bucket", true},
+		{"sthree-bucket", true},
+		{"amzn-s3-demo-bucket", true},
+
+		// invalid: forbidden suffixes
+		{"bucket-s3alias", true},
+		{"bucket--ol-s3", true},
+		{"bucket.mrap", true},
+		{"bucket--x-s3", true},
+		{"bucket--table-s3", true},
+	}
+
+	for _, tc := range tests {
+		tc := tc // capture
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			provider := S3Cache{URI: fmt.Sprintf("s3://%s", tc.name)}
+
+			err := provider.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateBucketName(%q) returned err=%v, wantErr=%v", tc.name, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func FuzzValidate(f *testing.F) {
+	// seed corpus
+	seeds := []string{
+		"abc", "my.bucket", "a-b-c", strings.Repeat("a", 63),
+		"ab", "UpperCase", "has..dots", "192.168.0.1",
+		"xn--foo", "sthree-bar", "bucket-s3alias",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, name string) {
+		// Just make sure we never panic or hang
+		provider := S3Cache{URI: fmt.Sprintf("s3://%s", name)}
+		_ = provider.Validate()
+	})
+}
 
 func TestGetEntry(t *testing.T) {
 	body := io.NopCloser(bytes.NewBufferString("hello"))
@@ -86,7 +162,7 @@ func TestGetEntry(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeS3{out: tc.apiOut, err: tc.apiErr}
-			c := &internal.S3Cache{URI: "s3://mybucket", Client: f}
+			c := &S3Cache{URI: "s3://mybucket", Client: f}
 
 			rc, err := c.GetEntry("mykey")
 			if tc.wantErr != "" {
@@ -105,7 +181,7 @@ func TestGetEntry(t *testing.T) {
 
 	// check that nothing breaks when S3 returns an empty body
 	f := &fakeS3{out: &s3.GetObjectOutput{Body: nil}, err: nil}
-	c := &internal.S3Cache{URI: "s3://test", Client: f}
+	c := &S3Cache{URI: "s3://test", Client: f}
 
 	_, err := c.GetEntry("foobar")
 	if err == nil {
@@ -116,7 +192,7 @@ func TestGetEntry(t *testing.T) {
 func TestPutEntry_WithManager(t *testing.T) {
 	// inject the fakeUploader so we never hit real AWS
 	fu := &fakeUploader{}
-	c := &internal.S3Cache{
+	c := &S3Cache{
 		URI:      "s3://mybucket",
 		Uploader: fu,
 	}
@@ -147,7 +223,7 @@ func TestPutEntry_WithManager(t *testing.T) {
 func TestCountingReader(t *testing.T) {
 	t.Run("successive reads accumulate ByteCount", func(t *testing.T) {
 		data := []byte("abcdef")
-		cr := &internal.CountingReader{Reader: bytes.NewBuffer(data)}
+		cr := &CountingReader{Reader: bytes.NewBuffer(data)}
 
 		// first read: 3 bytes
 		buf := make([]byte, 3)
@@ -178,7 +254,7 @@ func TestCountingReader(t *testing.T) {
 
 	t.Run("underlying Read error does not change ByteCount", func(t *testing.T) {
 		readErr := errors.New("boom")
-		cr := &internal.CountingReader{Reader: errReader{err: readErr}}
+		cr := &CountingReader{Reader: errReader{err: readErr}}
 
 		buf := make([]byte, 5)
 		n, err := cr.Read(buf)
@@ -209,7 +285,7 @@ func FuzzCountingReader(f *testing.F) {
 	f.Add(long)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		cr := &internal.CountingReader{Reader: bytes.NewReader(data)}
+		cr := &CountingReader{Reader: bytes.NewReader(data)}
 		buf := make([]byte, len(data))
 		n, err := cr.Read(buf)
 		if err != nil && err != io.EOF {

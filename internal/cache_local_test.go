@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/simse/cmd-cache/internal"
+	"github.com/simse/ccmd/internal"
 	"github.com/spf13/afero"
 )
 
