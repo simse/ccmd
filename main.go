@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/alexflint/go-arg"
-	"github.com/simse/cmd-cache/commands"
+	"github.com/simse/ccmd/commands"
 )
 
 var (
@@ -29,7 +29,10 @@ func main() {
 
 	switch {
 	case args.Run != nil:
-		commands.RunCommand(args.Run)
+		commands.RunCommand(args.Run, commands.RuntimeInformation{
+			Version: version,
+			Commit:  commit,
+		})
 		return
 	case args.CacheList != nil:
 		commands.CacheListCommand()
