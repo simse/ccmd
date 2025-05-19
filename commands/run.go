@@ -37,7 +37,8 @@ var profiling struct {
 	CacheSave        time.Duration
 }
 
-func RunCommand(args *RunCommandArgs) {
+func RunCommand(args *RunCommandArgs, runtime RuntimeInformation) {
+	printLogo(runtime)
 
 	// determine working directory
 	workingDirectory := args.WorkingDirectory
@@ -158,6 +159,14 @@ func RunCommand(args *RunCommandArgs) {
 }
 
 /* helpers */
+func printLogo(runtime RuntimeInformation) {
+	color.BgRGB(24, 24, 27).AddRGB(255, 210, 48).Print("🗲 ")
+	color.BgRGB(255, 210, 48).AddRGB(24, 24, 27).Print(" ccmd ")
+	dimGrey.Printf(" v%s (%s)", runtime.Version, runtime.Commit)
+	fmt.Println()
+	fmt.Println()
+}
+
 func printError(error string, exitCode int) {
 	color.Set(color.FgRed)
 	fmt.Printf("! ")
@@ -175,13 +184,7 @@ func validateArgs(args RunCommandArgs) {
 	}
 
 	// validate cache providers
-	for _, cacheProvider := range args.Cache {
-		provider, _ := cache.GetCacheProviderFromURI(cacheProvider)
-
-		if provider == nil {
-			printError(fmt.Sprintf("Unknown cache provider: %s", cacheProvider), 1)
-		}
-	}
+	validateCacheBackends(args.Cache)
 }
 
 func printFileList(files []string, maxFiles int, prefix string) {
@@ -205,6 +208,24 @@ func formatDuration(dur time.Duration) string {
 }
 
 /* steps */
+func validateCacheBackends(caches []string) {
+	for _, cacheUri := range caches {
+		provider, err := cache.GetCacheProviderFromURI(cacheUri)
+
+		if err != nil {
+			printError(fmt.Sprintf("invalid cache provider: %s", err.Error()), 1)
+			return
+		}
+
+		err = provider.Validate()
+
+		if err != nil {
+			printError(fmt.Sprintf("validation error for %s: %s", cacheUri, err.Error()), 1)
+			return
+		}
+	}
+}
+
 func cacheLookup(key string, caches []string) io.ReadCloser {
 	for _, cacheUri := range caches {
 		provider, err := cache.GetCacheProviderFromURI(cacheUri)
