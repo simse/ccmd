@@ -18,6 +18,19 @@
 				"group": "Get Started",
 				"pages": ["index", "quickstart"]
 			},
+      {
+        "group": "Configuration",
+        "pages": [
+          {
+            "group": "Cache Backends",
+            "icon": "database",
+            "pages": [
+              "configuration/cache/index",
+              "configuration/cache/s3"
+            ]
+          }
+        ]
+      },
 			{
 				"group": "CLI Reference",
 				"pages": ["commands/run"]
